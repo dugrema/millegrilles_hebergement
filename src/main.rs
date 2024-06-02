@@ -5,6 +5,7 @@ mod transactions;
 mod commandes;
 mod evenements;
 mod requetes;
+mod structure_donnees;
 
 use log::info;
 use millegrilles_common_rust::tokio::runtime::Builder;

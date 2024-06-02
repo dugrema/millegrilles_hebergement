@@ -20,6 +20,7 @@ use millegrilles_common_rust::mongodb::options::FindOptions;
 use serde::{Deserialize, Serialize};
 use crate::constantes;
 use crate::domaine_hebergement::GestionnaireDomaineHebergement;
+use crate::structure_donnees::ClientHebergementRow;
 
 pub async fn consommer_requete<M>(gestionnaire: &GestionnaireDomaineHebergement, middleware: &M, message: MessageValide)
     -> Result<Option<MessageMilleGrillesBufferDefault>, Error>
@@ -35,10 +36,10 @@ pub async fn consommer_requete<M>(gestionnaire: &GestionnaireDomaineHebergement,
 
     match action.as_str() {
         // Commandes standard
-        // constantes::REQUETE_SYNC_MESSAGES => requete_sync_messages(gestionnaire, middleware, message).await,
+        constantes::REQUETE_LISTE_CLIENTS => requete_liste_clients(gestionnaire, middleware, message).await,
 
         // Commande inconnue
-        _ => Err(Error::String(format!("consommer_commande: Commande {} inconnue, **DROPPED**\n{}",
+        _ => Err(Error::String(format!("consommer_requete: Requete {} inconnue, **DROPPED**\n{}",
                                        action, from_utf8(message.message.buffer.as_slice())?)))?,
     }
 
@@ -60,7 +61,7 @@ fn verifier_autorisation(message: &MessageValide) -> Result<(Option<String>, boo
                 match message.certificat.verifier_delegation_globale(DELEGATION_GLOBALE_PROPRIETAIRE)? {
                     true => Ok(()),
                     false => Err(Error::String(format!(
-                        "verifier_autorisation: Commande autorisation invalide pour message {:?}",
+                        "verifier_autorisation: Requete autorisation invalide pour message {:?}",
                         message.type_message))),
                 }
             }
@@ -73,3 +74,70 @@ fn verifier_autorisation(message: &MessageValide) -> Result<(Option<String>, boo
 // ********
 // Requetes
 // ********
+#[derive(Deserialize)]
+struct RequeteListeClients {}
+
+#[derive(Serialize)]
+struct ReponseClientRow {}
+
+#[derive(Serialize)]
+struct ReponseListeClients {
+    ok: bool,
+    err: Option<String>,
+    clients: Vec<ReponseClientRow>,
+}
+
+impl From<ClientHebergementRow> for ReponseClientRow {
+    fn from(value: ClientHebergementRow) -> Self {
+        todo!()
+    }
+}
+
+async fn requete_liste_clients<M>(_gestionnaire: &GestionnaireDomaineHebergement, middleware: &M, message: MessageValide)
+    -> Result<Option<MessageMilleGrillesBufferDefault>, Error>
+    where M: GenerateurMessages + MongoDao
+{
+    debug!("requete_liste_clients Message recu {:?}\n{}", message.type_message, from_utf8(message.message.buffer.as_slice())?);
+    let message_ref = message.message.parse()?;
+    let requete: RequeteListeClients = message_ref.contenu()?.deserialize()?;
+
+    // let skip = requete.skip.unwrap_or_else(|| 0);
+    // let limit = requete.limit.unwrap_or_else(|| 1000);
+
+    let user_id = match message.certificat.get_user_id()? {
+        Some(inner) => inner,
+        None => Err(Error::Str("requete_sync_messages Certificat sans user_id"))?
+    };
+
+    let filtre = doc! {};
+    let options = FindOptions::builder()
+        // .skip(skip)
+        // .limit(limit)
+        // .projection(doc!{"message_id": 1, CHAMP_MODIFICATION: 1, "supprime": 1, "date_traitement": 1})
+        // .sort(doc!{CHAMP_CREATION: 1, "_id": 1})
+        .build();
+    let collection = middleware.get_collection_typed::<ClientHebergementRow>(constantes::COLLECTION_CLIENTS_NOM)?;
+    let mut curseur = collection.find(filtre, options).await?;
+    // let mut resultat = Vec::with_capacity(limit as usize);
+    let mut resultat = Vec::new();
+    while curseur.advance().await? {
+        let row = match curseur.deserialize_current() {
+            Ok(inner) => inner,
+            Err(e) => {
+                error!("requete_liste_clients Erreur mapping row message, skip : {:?}", e);
+                continue
+            }
+        };
+
+        let message_sync = ReponseClientRow::from(row);
+        resultat.push(message_sync);
+    }
+
+    let reponse = ReponseListeClients {
+        ok: true,
+        err: None,
+        clients: resultat,
+    };
+
+    Ok(Some(middleware.build_reponse(reponse)?.0))
+}
