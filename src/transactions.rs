@@ -50,7 +50,8 @@ pub struct TransactionSauvegarderClient {
     pub expiration: Option<DateTime<Utc>>,
     pub roles: Option<Vec<String>>,
     pub domaines: Option<Vec<String>>,
-    pub data_chiffre: Option<DataChiffre>
+    pub data_chiffre: Option<DataChiffre>,
+    pub actif: Option<bool>
 }
 
 async fn transaction_sauvegarder_client<M>(_gestionnaire: &GestionnaireDomaineHebergement, middleware: &M, transaction: TransactionValide)
@@ -69,6 +70,7 @@ async fn transaction_sauvegarder_client<M>(_gestionnaire: &GestionnaireDomaineHe
         Some(inner) => Some(convertir_to_bson(inner)?),
         None => None
     };
+    let actif = message_recu.actif.unwrap_or_else(|| true);
     let ops = doc!{
         "$setOnInsert": {
             // "idmg": &idmg,
@@ -80,6 +82,7 @@ async fn transaction_sauvegarder_client<M>(_gestionnaire: &GestionnaireDomaineHe
             "roles": message_recu.roles,
             "domaines": message_recu.domaines,
             "data_chiffre": data_chiffre,
+            "actif": actif,
         },
         "$currentDate": {CommonConstantes::CHAMP_MODIFICATION: true}
     };

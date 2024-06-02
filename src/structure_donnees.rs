@@ -12,6 +12,7 @@ pub struct QuotaClient {
 #[derive(Deserialize)]
 pub struct ClientHebergementRow {
     pub idmg: String,
+    pub descriptif: Option<String>,
     pub roles: Option<Vec<String>>,
     pub domaines: Option<Vec<String>>,
     pub contact: Option<String>,

@@ -74,6 +74,8 @@ struct RequeteListeClients {}
 struct ReponseClientRow {
     idmg: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    descriptif: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     roles: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     domaines: Option<Vec<String>>,
@@ -98,6 +100,7 @@ impl From<ClientHebergementRow> for ReponseClientRow {
     fn from(value: ClientHebergementRow) -> Self {
         Self {
             idmg: value.idmg,
+            descriptif: value.descriptif,
             roles: value.roles,
             domaines: value.domaines,
             contact: value.contact,
