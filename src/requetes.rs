@@ -10,7 +10,7 @@ use millegrilles_common_rust::dechiffrage::DataChiffre;
 use millegrilles_common_rust::error::Error;
 use millegrilles_common_rust::generateur_messages::{GenerateurMessages, RoutageMessageAction};
 use millegrilles_common_rust::middleware::MiddlewareMessages;
-use millegrilles_common_rust::millegrilles_cryptographie::messages_structs::MessageMilleGrillesBufferDefault;
+use millegrilles_common_rust::millegrilles_cryptographie::messages_structs::{MessageMilleGrillesBufferDefault, optionepochseconds};
 use millegrilles_common_rust::mongo_dao::MongoDao;
 use millegrilles_common_rust::rabbitmq_dao::TypeMessageOut;
 use millegrilles_common_rust::recepteur_messages::MessageValide;
@@ -20,14 +20,14 @@ use millegrilles_common_rust::mongodb::options::FindOptions;
 use serde::{Deserialize, Serialize};
 use crate::constantes;
 use crate::domaine_hebergement::GestionnaireDomaineHebergement;
-use crate::structure_donnees::ClientHebergementRow;
+use crate::structure_donnees::{ClientHebergementRow, QuotaClient};
 
 pub async fn consommer_requete<M>(gestionnaire: &GestionnaireDomaineHebergement, middleware: &M, message: MessageValide)
     -> Result<Option<MessageMilleGrillesBufferDefault>, Error>
     where M: MiddlewareMessages + MongoDao
 {
     debug!("consommer_requete : {:?}", &message.type_message);
-    let (_user_id, _role_prive) = verifier_autorisation(&message)?;
+    verifier_autorisation(&message)?;
 
     let action = match &message.type_message {
         TypeMessageOut::Requete(r) => r.action.clone(),
@@ -47,28 +47,21 @@ pub async fn consommer_requete<M>(gestionnaire: &GestionnaireDomaineHebergement,
 
 /// Verifier si le message est autorise a etre execute comme requete. Lance une erreur si le
 /// message doit etre rejete.
-fn verifier_autorisation(message: &MessageValide) -> Result<(Option<String>, bool), Error> {
-    let user_id = message.certificat.get_user_id()?;
-    let role_prive = message.certificat.verifier_roles(vec![RolesCertificats::ComptePrive])?;
-
-    if role_prive && user_id.is_some() {
-        // Ok, requete usager
-    } else {
-        match message.certificat.verifier_exchanges(vec!(Securite::L1Public, Securite::L2Prive, Securite::L3Protege, Securite::L4Secure))? {
-            true => Ok(()),
-            false => {
-                // Verifier si on a un certificat delegation globale
-                match message.certificat.verifier_delegation_globale(DELEGATION_GLOBALE_PROPRIETAIRE)? {
-                    true => Ok(()),
-                    false => Err(Error::String(format!(
-                        "verifier_autorisation: Requete autorisation invalide pour message {:?}",
-                        message.type_message))),
-                }
+fn verifier_autorisation(message: &MessageValide) -> Result<(), Error> {
+    match message.certificat.verifier_exchanges(vec!(Securite::L3Protege, Securite::L4Secure))? {
+        true => Ok(()),
+        false => {
+            // Verifier si on a un certificat delegation globale
+            match message.certificat.verifier_delegation_globale(DELEGATION_GLOBALE_PROPRIETAIRE)? {
+                true => Ok(()),
+                false => Err(Error::String(format!(
+                    "verifier_autorisation: Requete autorisation invalide pour message {:?}",
+                    message.type_message))),
             }
-        }?;
-    }
+        }
+    }?;
 
-    Ok((user_id, role_prive))
+    Ok(())
 }
 
 // ********
@@ -78,7 +71,21 @@ fn verifier_autorisation(message: &MessageValide) -> Result<(Option<String>, boo
 struct RequeteListeClients {}
 
 #[derive(Serialize)]
-struct ReponseClientRow {}
+struct ReponseClientRow {
+    idmg: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    roles: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    domaines: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    contact: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    information: Option<String>,
+    #[serde(default, with = "optionepochseconds", skip_serializing_if = "Option::is_none")]
+    expiration: Option<DateTime<Utc>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    quota: Option<QuotaClient>,
+}
 
 #[derive(Serialize)]
 struct ReponseListeClients {
@@ -89,7 +96,15 @@ struct ReponseListeClients {
 
 impl From<ClientHebergementRow> for ReponseClientRow {
     fn from(value: ClientHebergementRow) -> Self {
-        todo!()
+        Self {
+            idmg: value.idmg,
+            roles: value.roles,
+            domaines: value.domaines,
+            contact: value.contact,
+            information: value.information,
+            expiration: value.expiration,
+            quota: value.quota,
+        }
     }
 }
 

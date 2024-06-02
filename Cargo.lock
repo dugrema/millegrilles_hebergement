@@ -2451,8 +2451,8 @@ checksum = "6c8640c5d730cb13ebd907d8d04b52f55ac9a2eec55b440c8892f40d56c76c1d"
 
 [[package]]
 name = "millegrilles_common_rust"
-version = "2024.4.5"
-source = "git+https://github.com/dugrema/millegrilles_common_rust.git?branch=2024.5#3d6e7d6e8408396531a72e1deb1e5c77e1245a2b"
+version = "2024.5.0"
+source = "git+https://github.com/dugrema/millegrilles_common_rust.git?branch=2024.5#784938a4ab01b8aaf785bcec6854f6a37cc9b79c"
 dependencies = [
  "async-compression",
  "async-recursion",
@@ -2503,8 +2503,8 @@ dependencies = [
 
 [[package]]
 name = "millegrilles_cryptographie"
-version = "2024.4.8"
-source = "git+https://github.com/dugrema/millegrilles_cryptographie.git?branch=2024.4#e99293dbb68438e7b0284c9968abd909be9f8e38"
+version = "2024.5.0"
+source = "git+https://github.com/dugrema/millegrilles_cryptographie.git?branch=2024.5#54534f187bbc5d72d5338510d1e89c2be7aad612"
 dependencies = [
  "base64 0.22.1",
  "blake2",
@@ -3249,9 +3249,9 @@ dependencies = [
 
 [[package]]
 name = "proc-macro2"
-version = "1.0.84"
+version = "1.0.85"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ec96c6a92621310b51366f1e28d05ef11489516e93be030060e5fc12024a49d6"
+checksum = "22244ce15aa966053a896d1accb3a6e68469b97c7f33f284b99f0d576879fc23"
 dependencies = [
  "unicode-ident",
 ]

@@ -15,7 +15,7 @@ pub fn preparer_queues() -> Vec<QueueType> {
     rk_volatils.push(ConfigRoutingExchange {routing_key: format!("requete.{}.{}", constantes::DOMAINE_NOM, constantes::REQUETE_LISTE_CLIENTS), exchange: Securite::L3Protege});
 
     // Commandes
-    // rk_volatils.push(ConfigRoutingExchange {routing_key: format!("commande.{}.{}", DOMAINE_NOM, COMMANDE_POSTER_V1), exchange: Securite::L3Protege});
+    rk_volatils.push(ConfigRoutingExchange {routing_key: format!("commande.{}.{}", constantes::DOMAINE_NOM, constantes::TRANSACTION_SAUVEGARDER_CLIENT), exchange: Securite::L3Protege});
 
     // Evenements
     // rk_volatils.push(ConfigRoutingExchange {routing_key: format!("evenement.{}.{}", DOMAINE_FICHIERS, EVENEMENT_FICHIERS_SYNCPRET), exchange: Securite::L3Protege});

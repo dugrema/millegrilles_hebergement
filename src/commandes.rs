@@ -7,7 +7,7 @@ use millegrilles_common_rust::base64::{Engine as _, engine::general_purpose::STA
 use millegrilles_common_rust::bson::doc;
 use millegrilles_common_rust::certificats::{ValidateurX509, VerificateurPermissions};
 use millegrilles_common_rust::chiffrage_cle::CommandeAjouterCleDomaine;
-use millegrilles_common_rust::chrono::{DateTime, Utc};
+use millegrilles_common_rust::chrono::Utc;
 use millegrilles_common_rust::common_messages::{ReponseRequeteDechiffrageV2, RequeteDechiffrage};
 use millegrilles_common_rust::constantes::{COMMANDE_ACTIVITE_FUUIDS, COMMANDE_AJOUTER_CLE_DOMAINES, DELEGATION_GLOBALE_PROPRIETAIRE, DOMAINE_FICHIERS, DOMAINE_NOM_MAITREDESCLES, DOMAINE_NOM_MAITREDESCOMPTES, MAITREDESCLES_REQUETE_DECHIFFRAGE_MESSAGE, MAITREDESCLES_REQUETE_DECHIFFRAGE_V2, RolesCertificats, Securite};
 use millegrilles_common_rust::dechiffrage::DataChiffre;
@@ -21,7 +21,7 @@ use millegrilles_common_rust::millegrilles_cryptographie::maitredescles::generer
 use millegrilles_common_rust::millegrilles_cryptographie::messages_structs::MessageMilleGrillesBufferDefault;
 use millegrilles_common_rust::millegrilles_cryptographie::messages_structs::optionepochseconds;
 use millegrilles_common_rust::millegrilles_cryptographie::x25519::CleSecreteX25519;
-use millegrilles_common_rust::millegrilles_cryptographie::x509::EnveloppeCertificat;
+use millegrilles_common_rust::millegrilles_cryptographie::x509::{EnveloppeCertificat, lire_idmg};
 use millegrilles_common_rust::mongo_dao::MongoDao;
 use millegrilles_common_rust::mongodb::options::{FindOneAndUpdateOptions, FindOptions, ReturnDocument};
 use millegrilles_common_rust::rabbitmq_dao::TypeMessageOut;
@@ -33,13 +33,15 @@ use serde::{Deserialize, Serialize};
 
 use crate::constantes;
 use crate::domaine_hebergement::GestionnaireDomaineHebergement;
+use crate::structure_donnees::ClientHebergementRow;
+use crate::transactions::TransactionSauvegarderClient;
 
 pub async fn consommer_commande<M>(gestionnaire: &GestionnaireDomaineHebergement, middleware: &M, message: MessageValide)
     -> Result<Option<MessageMilleGrillesBufferDefault>, Error>
     where M: GenerateurMessages + MongoDao + ValidateurX509 + CleChiffrageHandler
 {
     debug!("consommer_commande : {:?}", &message.type_message);
-    let (_user_id, _role_prive) = verifier_autorisation(&message)?;
+    verifier_autorisation(&message)?;
 
     let action = match &message.type_message {
         TypeMessageOut::Commande(r) => r.action.clone(),
@@ -48,7 +50,7 @@ pub async fn consommer_commande<M>(gestionnaire: &GestionnaireDomaineHebergement
 
     match action.as_str() {
         // Commandes standard
-        // constantes::COMMANDE_POSTER_V1 => commande_poster_v1(gestionnaire, middleware, message).await,
+        constantes::TRANSACTION_SAUVEGARDER_CLIENT => commande_sauvegarder_client(gestionnaire, middleware, message).await,
         // Commande inconnue
         _ => Err(Error::String(format!("consommer_commande: Commande {} inconnue, **DROPPED**\n{}",
                                        action, from_utf8(message.message.buffer.as_slice())?)))?,
@@ -57,30 +59,54 @@ pub async fn consommer_commande<M>(gestionnaire: &GestionnaireDomaineHebergement
 
 /// Verifier si le message est autorise  a etre execute comme commonde. Lance une erreur si le
 /// message doit etre rejete.
-fn verifier_autorisation(message: &MessageValide) -> Result<(Option<String>, bool), Error> {
+fn verifier_autorisation(message: &MessageValide) -> Result<(), Error> {
     let user_id = message.certificat.get_user_id()?;
-    let role_prive = message.certificat.verifier_roles(vec![RolesCertificats::ComptePrive])?;
 
-    if role_prive && user_id.is_some() {
-        // Ok, commande usager
-    } else {
-        match message.certificat.verifier_exchanges(vec!(Securite::L1Public, Securite::L2Prive, Securite::L3Protege, Securite::L4Secure))? {
-            true => Ok(()),
-            false => {
-                // Verifier si on a un certificat delegation globale
-                match message.certificat.verifier_delegation_globale(DELEGATION_GLOBALE_PROPRIETAIRE)? {
-                    true => Ok(()),
-                    false => Err(Error::String(format!(
-                        "verifier_autorisation: Commande autorisation invalide pour message {:?}",
-                        message.type_message))),
-                }
+    match message.certificat.verifier_exchanges(vec!(Securite::L3Protege, Securite::L4Secure))? {
+        true => Ok(()),
+        false => {
+            // Verifier si on a un certificat delegation globale
+            match message.certificat.verifier_delegation_globale(DELEGATION_GLOBALE_PROPRIETAIRE)? {
+                true => Ok(()),
+                false => Err(Error::String(format!(
+                    "verifier_autorisation: Commande autorisation invalide pour message {:?}",
+                    message.type_message))),
             }
-        }?;
-    }
+        }
+    }?;
 
-    Ok((user_id, role_prive))
+    Ok(())
 }
 
 // *********
 // Commandes
 // *********
+async fn commande_sauvegarder_client<M>(gestionnaire: &GestionnaireDomaineHebergement, middleware: &M, message: MessageValide)
+    -> Result<Option<MessageMilleGrillesBufferDefault>, Error>
+    where M: GenerateurMessages + MongoDao + ValidateurX509
+{
+    debug!("requete_liste_clients Message recu {:?}\n{}", message.type_message, from_utf8(message.message.buffer.as_slice())?);
+    let message_owned = message.message.parse_to_owned()?;
+
+    // Valider structure de la commande
+    let commande: TransactionSauvegarderClient = message_owned.deserialize()?;
+
+    // Valider le idmg
+    let idmg = commande.idmg;
+    let val_idmg = lire_idmg(idmg.as_str())?;
+    let now = Utc::now();
+    if val_idmg.expiration < now {
+        Err(Error::String(format!("commande_sauvegarder_client IDMG {} expire depuis : {:?}", idmg, val_idmg.expiration)))?
+    }
+
+    // Verifier si on a une cle a sauvegarder
+    if let Some(mut attachements) = message_owned.attachements {
+        if let Some(cle) = attachements.remove("cle") {
+            todo!("Sauvegarder cle")
+        }
+    }
+
+    sauvegarder_traiter_transaction_v2(middleware, message, gestionnaire).await?;
+
+    Ok(Some(middleware.reponse_ok(None, None)?))
+}

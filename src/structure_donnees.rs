@@ -1,10 +1,10 @@
 use millegrilles_common_rust::bson;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use millegrilles_common_rust::chrono::{DateTime, Utc};
 use millegrilles_common_rust::mongo_dao::opt_chrono_datetime_as_bson_datetime;
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct QuotaClient {
 
 }
