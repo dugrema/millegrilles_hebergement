@@ -121,8 +121,13 @@ async fn requete_liste_clients<M>(_gestionnaire: &GestionnaireDomaineHebergement
 {
     debug!("requete_liste_clients Message recu {:?}\n{}", message.type_message, from_utf8(message.message.buffer.as_slice())?);
 
-    if !message.certificat.verifier_exchanges(vec![Securite::L3Protege])? {
-        Err(Error::Str("requete_liste_clients Acces refuse (exchange doit etre 3.protege"))?
+    let est_delegation_globale = message.certificat.verifier_delegation_globale(DELEGATION_GLOBALE_PROPRIETAIRE)?;
+    if est_delegation_globale {
+        // Ok
+    } else if message.certificat.verifier_exchanges(vec![Securite::L3Protege, Securite::L4Secure])? {
+        // Ok
+    } else {
+        Err(Error::Str("requete_liste_clients Acces refuse (exchange doit etre 3.protege/4.secure ou certificat proprietaire"))?
     }
 
     let message_ref = message.message.parse()?;
@@ -213,7 +218,7 @@ async fn requete_token_jwt<M>(_gestionnaire: &GestionnaireDomaineHebergement, mi
         }
     };
 
-    debug!("requete_liste_clients Verifier enveloppe requete");
+    debug!("requete_token_jwt Verifier enveloppe requete");
     let enveloppe_requete = match requete_client.certificat.as_ref() {
         Some(inner) => {
             match middleware.charger_enveloppe(inner, None, Some(ca_pem.as_str())).await {
@@ -230,13 +235,23 @@ async fn requete_token_jwt<M>(_gestionnaire: &GestionnaireDomaineHebergement, mi
         }
     };
 
+    let certificat_requete_valide = middleware.valider_chaine(
+        enveloppe_requete.as_ref(), Some(enveloppe_idmg.as_ref()), true)?;
+    if ! certificat_requete_valide {
+        debug!("requete_token_jwt Certificat requete invalide");
+        return Ok(Some(middleware.reponse_err(Some(9), None, Some("Certificat requete invalide"))?))
+    }
+
     debug!("requete_liste_clients Verifier enveloppe requete");
     if requete_client.pubkey.as_str() != enveloppe_requete.fingerprint()?.as_str() {
         return Ok(Some(middleware.reponse_err(Some(8), None, Some("Mismatch certificat requete"))?))
     }
 
-    if(!enveloppe_requete.verifier_roles_string(vec!["core".to_string()])?) {
+    if !enveloppe_requete.verifier_roles_string(vec!["core".to_string()])? {
         Err(Error::Str("requete_token_jwt Seul le role core est supporte"))?
+    }
+    if !enveloppe_requete.verifier_exchanges(vec![Securite::L4Secure])? {
+        Err(Error::Str("requete_token_jwt Seul le niveau 4.secure est supporte"))?
     }
 
     let idmg = enveloppe_idmg.calculer_idmg()?;
