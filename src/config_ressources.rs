@@ -13,6 +13,7 @@ pub fn preparer_queues() -> Vec<QueueType> {
 
     // Requetes
     rk_volatils.push(ConfigRoutingExchange {routing_key: format!("requete.{}.{}", constantes::DOMAINE_NOM, constantes::REQUETE_LISTE_CLIENTS), exchange: Securite::L3Protege});
+    rk_volatils.push(ConfigRoutingExchange {routing_key: format!("requete.{}.{}", constantes::DOMAINE_NOM, constantes::REQUETE_TOKEN_JWT), exchange: Securite::L1Public});
 
     // Commandes
     rk_volatils.push(ConfigRoutingExchange {routing_key: format!("commande.{}.{}", constantes::DOMAINE_NOM, constantes::TRANSACTION_SAUVEGARDER_CLIENT), exchange: Securite::L3Protege});

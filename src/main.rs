@@ -6,6 +6,7 @@ mod commandes;
 mod evenements;
 mod requetes;
 mod structure_donnees;
+mod jwt;
 
 use log::info;
 use millegrilles_common_rust::tokio::runtime::Builder;
