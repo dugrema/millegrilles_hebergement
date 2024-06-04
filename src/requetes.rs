@@ -235,6 +235,10 @@ async fn requete_token_jwt<M>(_gestionnaire: &GestionnaireDomaineHebergement, mi
         return Ok(Some(middleware.reponse_err(Some(8), None, Some("Mismatch certificat requete"))?))
     }
 
+    if(!enveloppe_requete.verifier_roles_string(vec!["core".to_string()])?) {
+        Err(Error::Str("requete_token_jwt Seul le role core est supporte"))?
+    }
+
     let idmg = enveloppe_idmg.calculer_idmg()?;
     if enveloppe_requete.idmg()? != idmg.as_str() {
         return Ok(Some(middleware.reponse_err(Some(5), None, Some("Mismatch idmg certificat/ca"))?))
@@ -250,20 +254,6 @@ async fn requete_token_jwt<M>(_gestionnaire: &GestionnaireDomaineHebergement, mi
             return Ok(Some(middleware.reponse_err(Some(9), None, Some("Hebergement non configure pour client"))?))
         }
     };
-
-    if(!enveloppe_requete.verifier_roles_string(
-        vec!["collections".to_string(), "stream".to_string(), "media".to_string()])?) {
-        Err(Error::Str("requete_token_jwt Seuls les roles collections, stream et media sont supportes"))?
-    }
-
-    // match doc_hebergement.roles {
-    //     Some(inner) => {
-    //         if(!inner.contains(&"fichiers".to_string())) {
-    //             Err(Error::Str("requete_token_jwt Le seul role supporte est fichiers"))?
-    //         }
-    //     },
-    //     None => Err(Error::Str("requete_token_jwt Aucuns roles configures pour l'hebergement"))?
-    // };
 
     let roles_heberges = doc_hebergement.roles;
     let domaines_heberges = doc_hebergement.domaines;
