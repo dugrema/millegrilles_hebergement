@@ -38,6 +38,7 @@ pub async fn aiguillage_transaction<M, T>(gestionnaire: &GestionnaireDomaineHebe
 
     match action.as_str() {
         constantes::TRANSACTION_SAUVEGARDER_CLIENT => transaction_sauvegarder_client(gestionnaire, middleware, transaction).await,
+        constantes::TRANSACTION_AJOUTER_FICHIER => transaction_ajouter_fichier(gestionnaire, middleware, transaction).await,
         _ => Err(format!("transactions.aiguillage_transaction: Transaction {} est de type non gere : {}", transaction.transaction.id, action))?
     }
 }
@@ -88,6 +89,38 @@ async fn transaction_sauvegarder_client<M>(_gestionnaire: &GestionnaireDomaineHe
     };
     let collection = middleware.get_collection(constantes::COLLECTION_CLIENTS_NOM)?;
     let options = UpdateOptions::builder().upsert(true).build();
+    collection.update_one(filtre, ops, options).await?;
+
+    Ok(None)
+}
+
+#[derive(Deserialize)]
+pub struct TransactionAjouterFichier {
+    pub idmg: String,
+    pub fuuid: String,
+}
+
+async fn transaction_ajouter_fichier<M>(_gestionnaire: &GestionnaireDomaineHebergement,
+                                        middleware: &M, transaction: TransactionValide)
+    -> Result<Option<MessageMilleGrillesBufferDefault>, Error>
+    where M: MongoDao
+{
+    let message_recu: TransactionAjouterFichier = serde_json::from_str(transaction.transaction.contenu.as_str())?;
+
+    let collection = middleware.get_collection(constantes::COLLECTION_FICHIERS_NOM)?;
+    let filtre = doc!{"idmg": &message_recu.idmg, "fuuid": &message_recu.fuuid};
+    let options = UpdateOptions::builder().upsert(true).build();
+    let ops = doc!{
+        "$setOnInsert": {CommonConstantes::CHAMP_CREATION: Utc::now()},
+        "$currentDate": {
+            CommonConstantes::CHAMP_MODIFICATION: true,
+            constantes::CHAMP_DATE_PRESENCE: true,
+        },
+        "$set": {
+            constantes::CHAMP_DATE_SYNC: None::<&DateTime<Utc>>,
+            constantes::CHAMP_SYNC_EN_COURS: None::<bool>,
+        }
+    };
     collection.update_one(filtre, ops, options).await?;
 
     Ok(None)

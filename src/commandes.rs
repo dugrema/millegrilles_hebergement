@@ -7,7 +7,7 @@ use millegrilles_common_rust::base64::{Engine as _, engine::general_purpose::STA
 use millegrilles_common_rust::bson::doc;
 use millegrilles_common_rust::certificats::{ValidateurX509, VerificateurPermissions};
 use millegrilles_common_rust::chiffrage_cle::CommandeAjouterCleDomaine;
-use millegrilles_common_rust::chrono::Utc;
+use millegrilles_common_rust::chrono::{DateTime, Utc};
 use millegrilles_common_rust::common_messages::{ReponseRequeteDechiffrageV2, RequeteDechiffrage};
 use millegrilles_common_rust::constantes::{COMMANDE_ACTIVITE_FUUIDS, COMMANDE_AJOUTER_CLE_DOMAINES, DELEGATION_GLOBALE_PROPRIETAIRE, DOMAINE_FICHIERS, DOMAINE_NOM_MAITREDESCLES, DOMAINE_NOM_MAITREDESCOMPTES, MAITREDESCLES_REQUETE_DECHIFFRAGE_MESSAGE, MAITREDESCLES_REQUETE_DECHIFFRAGE_V2, RolesCertificats, Securite};
 use millegrilles_common_rust::dechiffrage::DataChiffre;
@@ -32,9 +32,10 @@ use millegrilles_common_rust::tokio::time as tokio_time;
 use serde::{Deserialize, Serialize};
 
 use crate::constantes;
+use crate::constantes::DOMAINE_NOM;
 use crate::domaine_hebergement::GestionnaireDomaineHebergement;
 use crate::structure_donnees::ClientHebergementRow;
-use crate::transactions::TransactionSauvegarderClient;
+use crate::transactions::{TransactionAjouterFichier, TransactionSauvegarderClient};
 
 pub async fn consommer_commande<M>(gestionnaire: &GestionnaireDomaineHebergement, middleware: &M, message: MessageValide)
     -> Result<Option<MessageMilleGrillesBufferDefault>, Error>
@@ -51,6 +52,7 @@ pub async fn consommer_commande<M>(gestionnaire: &GestionnaireDomaineHebergement
     match action.as_str() {
         // Commandes standard
         constantes::TRANSACTION_SAUVEGARDER_CLIENT => commande_sauvegarder_client(gestionnaire, middleware, message).await,
+        constantes::TRANSACTION_AJOUTER_FICHIER => commande_ajouter_fichier(gestionnaire, middleware, message).await,
         // Commande inconnue
         _ => Err(Error::String(format!("consommer_commande: Commande {} inconnue, **DROPPED**\n{}",
                                        action, from_utf8(message.message.buffer.as_slice())?)))?,
@@ -62,7 +64,7 @@ pub async fn consommer_commande<M>(gestionnaire: &GestionnaireDomaineHebergement
 fn verifier_autorisation(message: &MessageValide) -> Result<(), Error> {
     let user_id = message.certificat.get_user_id()?;
 
-    match message.certificat.verifier_exchanges(vec!(Securite::L3Protege, Securite::L4Secure))? {
+    match message.certificat.verifier_exchanges(vec!(Securite::L1Public, Securite::L2Prive, Securite::L3Protege, Securite::L4Secure))? {
         true => Ok(()),
         false => {
             // Verifier si on a un certificat delegation globale
@@ -107,6 +109,54 @@ async fn commande_sauvegarder_client<M>(gestionnaire: &GestionnaireDomaineHeberg
     }
 
     sauvegarder_traiter_transaction_v2(middleware, message, gestionnaire).await?;
+
+    Ok(Some(middleware.reponse_ok(None, None)?))
+}
+
+#[derive(Serialize)]
+struct EvenementConsignationHebergement {
+    idmg: String,
+    fuuid: String,
+}
+
+async fn commande_ajouter_fichier<M>(gestionnaire: &GestionnaireDomaineHebergement, middleware: &M, message: MessageValide)
+    -> Result<Option<MessageMilleGrillesBufferDefault>, Error>
+    where M: GenerateurMessages + MongoDao + ValidateurX509
+{
+    debug!("commande_ajouter_fichier Message recu {:?}\n{}", message.type_message, from_utf8(message.message.buffer.as_slice())?);
+    let message_owned = message.message.parse_to_owned()?;
+
+    // Valider structure de la commande
+    let commande: TransactionAjouterFichier = message_owned.deserialize()?;
+
+    // verifier si le fichier existe deja
+    let collection = middleware.get_collection(constantes::COLLECTION_FICHIERS_NOM)?;
+    let filtre = doc!{"idmg": &commande.idmg, "fuuid": &commande.fuuid};
+    if collection.find_one(filtre.clone(), None).await?.is_none() {
+        // Sauvegarder le nouveau fichier
+        sauvegarder_traiter_transaction_v2(middleware, message, gestionnaire).await?;
+    } else {
+        debug!("commande_ajouter_fichier Le fichier {} existe deja pour idmg {}, touch sans transaction", commande.fuuid, commande.idmg);
+        let ops = doc!{
+            "$currentDate": {
+                CommonConstantes::CHAMP_MODIFICATION: true,
+                constantes::CHAMP_DATE_PRESENCE: true,
+            },
+            "$set": {
+                constantes::CHAMP_DATE_SYNC: None::<&DateTime<Utc>>,
+                constantes::CHAMP_SYNC_EN_COURS: None::<bool>,
+            }
+        };
+        collection.update_one(filtre, ops, None).await?;
+    }
+
+    // Emettre evenement de consignation du fichier pour cet hebergement
+    let evenement = EvenementConsignationHebergement {idmg: commande.idmg.clone(), fuuid: commande.fuuid};
+    let routage = RoutageMessageAction::builder(
+        constantes::DOMAINE_NOM, "fichierAjoute", vec![Securite::L1Public])
+        .partition(commande.idmg)
+        .build();
+    middleware.emettre_evenement(routage, &evenement).await?;
 
     Ok(Some(middleware.reponse_ok(None, None)?))
 }

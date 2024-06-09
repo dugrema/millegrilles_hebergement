@@ -275,7 +275,7 @@ async fn requete_token_jwt<M>(_gestionnaire: &GestionnaireDomaineHebergement, mi
 
     // Generer les JWT
     let jwt_readonly = generer_jwt_hebergement(middleware, &idmg, false, roles_heberges.clone(), domaines_heberges.clone())?;
-    let jwt_readwrite = generer_jwt_hebergement(middleware, &idmg, true, roles_heberges, domaines_heberges)?;;
+    let jwt_readwrite = generer_jwt_hebergement(middleware, &idmg, true, roles_heberges, domaines_heberges)?;
 
     let reponse = ReponseTokenJwt {
         ok: true,
